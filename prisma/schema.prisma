@@ -1,0 +1,135 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String
+  name      String
+  phone     String?
+  role      String   @default("CUSTOMER") // CUSTOMER, ADMIN
+  createdAt DateTime @default(now())
+  orders    Order[]
+}
+
+model Collection {
+  id          Int       @id @default(autoincrement())
+  name        String
+  slug        String    @unique
+  description String?
+  image       String?
+  status      String    @default("PUBLISHED") // DRAFT, PUBLISHED, ARCHIVED
+  products    Product[]
+  createdAt   DateTime  @default(now())
+}
+
+model Product {
+  id               Int              @id @default(autoincrement())
+  name             String
+  slug             String           @unique
+  description      String
+  category         String           // Dresses, Tops
+  collectionId     Int?
+  collection       Collection?      @relation(fields: [collectionId], references: [id])
+  price            Float
+  compareAtPrice   Float?
+  images           String           // Comma-separated list of image URLs or base64 mock paths
+  material         String?
+  fit              String?
+  careInstructions String?
+  sizeGuide        String?
+  status           String           @default("PUBLISHED") // DRAFT, PUBLISHED, ARCHIVED
+  variants         ProductVariant[]
+  createdAt        DateTime         @default(now())
+}
+
+model ProductVariant {
+  id        Int     @id @default(autoincrement())
+  productId Int
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  size      String  // XS, S, M, L, XL
+  color     String  // Olive, Wine, Mustard, Charcoal, etc.
+  stock     Int     @default(0)
+  sku       String? @unique
+}
+
+model Order {
+  id                     Int         @id @default(autoincrement())
+  orderNumber            String      @unique // e.g. OD-2026-XXXX
+  userId                 Int?
+  user                   User?       @relation(fields: [userId], references: [id])
+  customerName           String
+  customerEmail          String
+  customerPhone          String
+  items                  OrderItem[]
+  subtotal               Float
+  deliveryFee            Float
+  total                  Float
+  deliveryMethod         String      // ABUJA_PICKUP, NATIONWIDE
+  address                String?
+  city                   String?
+  state                  String?
+  additionalInstructions String?
+  paymentStatus          String      @default("PENDING") // PENDING, PAID, FAILED, REFUNDED
+  orderStatus            String      @default("PENDING_PAYMENT") // PENDING_PAYMENT, PAID, PROCESSING, READY_FOR_PICKUP, SHIPPED, COMPLETED, CANCELLED
+  createdAt              DateTime    @default(now())
+  payments               Payment[]
+}
+
+model OrderItem {
+  id          Int     @id @default(autoincrement())
+  orderId     Int
+  order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId   Int
+  productName String
+  size        String
+  color       String
+  price       Float
+  quantity    Int
+}
+
+model Payment {
+  id                Int      @id @default(autoincrement())
+  orderId           Int
+  order             Order    @relation(fields: [orderId], references: [id])
+  paystackReference String   @unique
+  amount            Float
+  status            String   // PENDING, SUCCESSFUL, FAILED, REFUNDED
+  method            String?
+  createdAt         DateTime @default(now())
+}
+
+model DeliverySetting {
+  id              Int     @id @default(autoincrement())
+  method          String  @unique // ABUJA_PICKUP, NATIONWIDE
+  enabled         Boolean @default(true)
+  fee             Float   @default(0)
+  instructions    String?
+  locationDetails String?
+}
+
+model Discount {
+  id          Int       @id @default(autoincrement())
+  code        String    @unique
+  type        String    // PERCENTAGE, FIXED
+  value       Float
+  minPurchase Float?
+  active      Boolean   @default(true)
+  expiresAt   DateTime?
+}
+
+model AboutPageSetting {
+  id        Int      @id @default(1)
+  title     String   @default("many good things")
+  subtitle  String   @default("Our Story")
+  content   String   // Stores paragraphs separated by double newlines
+  image     String   @default("/logo-colors.jpg")
+  updatedAt DateTime @updatedAt
+}
+
