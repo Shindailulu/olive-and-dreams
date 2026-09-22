@@ -1,5 +1,5 @@
 import React from "react";
-import { prisma } from "@/lib/prisma";
+import { getAdminClient } from "@/lib/supabase";
 import { formatNaira } from "@/lib/utils";
 import Link from "next/link";
 import { ClipboardList, ArrowUpRight } from "lucide-react";
@@ -7,11 +7,13 @@ import { ClipboardList, ArrowUpRight } from "lucide-react";
 export const revalidate = 0;
 
 export default async function AdminOrdersPage() {
-  const orders = await prisma.order.findMany({
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
+  const supabase = getAdminClient();
+  const { data } = await supabase
+    .from("orders")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  const displayOrders = (data || []) as any[];
 
   return (
     <div className="space-y-8">
@@ -26,7 +28,7 @@ export default async function AdminOrdersPage() {
 
       {/* Orders Table */}
       <div className="bg-brand-cream border border-brand-burgundy/10 shadow-sm p-6 overflow-x-auto">
-        {orders.length > 0 ? (
+        {displayOrders.length > 0 ? (
           <table className="w-full text-left text-sm font-light">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-brand-charcoal/50 border-b border-brand-burgundy/10 pb-2">
@@ -40,30 +42,30 @@ export default async function AdminOrdersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-brand-burgundy/5">
-              {orders.map((order) => (
+              {displayOrders.map((order) => (
                 <tr key={order.id} className="hover:bg-brand-burgundy/5 transition-colors">
                   <td className="py-4 font-serif text-base text-brand-burgundy">
                     <Link href={`/admin/orders/${order.id}`}>
-                      {order.orderNumber}
+                      {order.order_number}
                     </Link>
                   </td>
                   <td className="py-4">
                     <div>
-                      <p className="font-medium text-brand-charcoal">{order.customerName}</p>
-                      <p className="text-xs text-brand-charcoal/50">{order.customerEmail}</p>
+                      <p className="font-medium text-brand-charcoal">{order.guest_name}</p>
+                      <p className="text-xs text-brand-charcoal/50">{order.guest_email}</p>
                     </div>
                   </td>
                   <td className="py-4 font-sans text-xs">
-                    {new Date(order.createdAt).toLocaleDateString("en-NG")}
+                    {new Date(order.created_at).toLocaleDateString("en-NG")}
                   </td>
-                  <td className="py-4 font-sans font-medium">{formatNaira(order.total)}</td>
+                  <td className="py-4 font-sans font-medium">{formatNaira(Number(order.total))}</td>
                   <td className="py-4">
-                    <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold ${order.paymentStatus === "PAID" ? "bg-brand-olive/15 text-brand-olive" : "bg-brand-burgundy/10 text-brand-burgundy"}`}>
-                      {order.paymentStatus}
+                    <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold ${order.payment_status === "paid" ? "bg-brand-olive/15 text-brand-olive" : "bg-brand-burgundy/10 text-brand-burgundy"}`}>
+                      {order.payment_status}
                     </span>
                   </td>
                   <td className="py-4 text-xs font-medium uppercase tracking-wider">
-                    {order.orderStatus}
+                    {order.status}
                   </td>
                   <td className="py-4 text-right">
                     <Link

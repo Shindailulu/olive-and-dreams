@@ -1,26 +1,47 @@
 import React from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { prisma } from "@/lib/prisma";
+import { getAdminClient } from "@/lib/supabase";
 import ProductCard from "@/components/ProductCard";
 
 export const revalidate = 0; // Fresh products stock status
 
 export default async function HomePage() {
-  // Fetch products from debut collection
-  const collection = await prisma.collection.findUnique({
-    where: { slug: "do-me-nice-do-me-jeje" },
-    include: {
-      products: {
-        where: { status: "PUBLISHED" },
-        include: {
-          variants: true,
-        },
-      },
-    },
-  });
+  const supabase = getAdminClient();
+  const { data: rawProducts } = await supabase
+    .from("products")
+    .select("*, product_variants(*), product_images(*), product_categories!inner(category_id, categories!inner(name, slug))")
+    .eq("status", "active")
+    .eq("product_categories.categories.slug", "do-me-nice-do-me-jeje");
 
-  const products = collection?.products || [];
+  const products = (rawProducts || []).map((p: any) => {
+    const images = (p.product_images || [])
+      .sort((a: any, b: any) => a.position - b.position)
+      .map((img: any) => img.url)
+      .join(",") || "/logo-colors.jpg";
+    const category = p.product_categories?.[0]?.categories?.name || "Uncategorized";
+    return {
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      description: p.description,
+      price: Number(p.price),
+      compareAtPrice: p.compare_at_price ? Number(p.compare_at_price) : null,
+      images,
+      category,
+      material: p.material,
+      fit: p.fit,
+      careInstructions: p.care_instructions,
+      sizeGuide: p.size_guide,
+      variants: (p.product_variants || []).map((v: any) => ({
+        id: v.id,
+        size: v.size,
+        color: v.color,
+        stock: v.stock_quantity,
+        sku: v.sku,
+      })),
+    };
+  });
 
   return (
     <div className="pb-24 space-y-20 bg-brand-cream">

@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 
 export interface CartItem {
   id: string; // productId-size-color key
-  productId: number;
+  productId: string;
   name: string;
   price: number;
   image: string;
@@ -15,7 +15,7 @@ export interface CartItem {
 }
 
 export interface WishlistItem {
-  id: number;
+  id: string;
   name: string;
   price: number;
   image: string;
@@ -31,7 +31,7 @@ interface StoreContextType {
   updateQuantity: (id: string, quantity: number) => void;
   clearCart: () => void;
   toggleWishlist: (item: WishlistItem) => void;
-  isInWishlist: (id: number) => boolean;
+  isInWishlist: (id: string) => boolean;
   cartCount: number;
   cartSubtotal: number;
 }
@@ -43,7 +43,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load from localStorage on mount
   useEffect(() => {
     const savedCart = localStorage.getItem("olive_dreams_cart");
     const savedWishlist = localStorage.getItem("olive_dreams_wishlist");
@@ -52,7 +51,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setIsLoaded(true);
   }, []);
 
-  // Save to localStorage on change
   useEffect(() => {
     if (isLoaded) {
       localStorage.setItem("olive_dreams_cart", JSON.stringify(cart));
@@ -72,7 +70,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (existingItemIndex > -1) {
         const updatedCart = [...prevCart];
         const newQty = updatedCart[existingItemIndex].quantity + newItem.quantity;
-        // Cap quantity at available stock
         updatedCart[existingItemIndex].quantity = Math.min(newQty, newItem.maxStock);
         return updatedCart;
       }
@@ -108,7 +105,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const isInWishlist = useCallback((id: number) => {
+  const isInWishlist = useCallback((id: string) => {
     return wishlist.some((item) => item.id === id);
   }, [wishlist]);
 
@@ -118,16 +115,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   return (
     <StoreContext.Provider
       value={{
-        cart,
-        wishlist,
-        addToCart,
-        removeFromCart,
-        updateQuantity,
-        clearCart,
-        toggleWishlist,
-        isInWishlist,
-        cartCount,
-        cartSubtotal,
+        cart, wishlist, addToCart, removeFromCart, updateQuantity, clearCart, toggleWishlist, isInWishlist, cartCount, cartSubtotal,
       }}
     >
       {children}

@@ -8,7 +8,7 @@ import { formatNaira } from "@/lib/utils";
 import { Heart } from "lucide-react";
 
 interface ProductCardProps {
-  id: number;
+  id: string;
   name: string;
   price: number;
   slug: string;

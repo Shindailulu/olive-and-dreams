@@ -1,6 +1,6 @@
 import React from "react";
 import { notFound, redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+import { getAdminClient } from "@/lib/supabase";
 import PayClient from "@/components/PayClient";
 
 export const revalidate = 0;
@@ -20,31 +20,66 @@ export default async function PayPage({ searchParams }: PayPageProps) {
 
   if (!orderIdStr || !checkoutUrl) {
     notFound();
+    return;
   }
 
-  const orderId = parseInt(orderIdStr);
-  if (isNaN(orderId)) {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(orderIdStr)) {
     notFound();
+    return;
   }
 
-  const order = await prisma.order.findUnique({
-    where: { id: orderId },
-    include: {
-      items: true,
-      payments: true,
-    },
-  });
+  const supabase = getAdminClient();
+  const { data } = await supabase
+    .from('orders')
+    .select('*, order_items(*)')
+    .eq('id', orderIdStr)
+    .single();
 
-  if (!order) {
+  const orderData = data as any;
+
+  if (!orderData) {
     notFound();
+    return;
   }
 
   // If already paid, send directly to confirmation
-  if (order.paymentStatus === "PAID") {
-    redirect(`/checkout/confirmation?orderId=${order.id}`);
+  if (orderData.payment_status === "paid") {
+    redirect(`/checkout/confirmation?orderId=${orderData.id}`);
   }
 
-  const reference = order.payments[0]?.paystackReference || "";
+  const order = {
+    ...orderData,
+    id: orderData.id,
+    total: Number(orderData.total),
+    paymentStatus: orderData.payment_status.toUpperCase(),
+    orderStatus: orderData.status.toUpperCase(),
+    orderNumber: orderData.order_number,
+    customerName: orderData.guest_name,
+    customerEmail: orderData.guest_email,
+    customerPhone: orderData.guest_phone,
+    deliveryFee: Number(orderData.shipping_fee),
+    deliveryMethod: orderData.delivery_method,
+    items: orderData.order_items.map((item: any) => {
+      let size = "";
+      let color = "";
+      if (item.variant_title) {
+        const parts = item.variant_title.split(" / ");
+        size = parts[0] || "";
+        color = parts[1] || "";
+      }
+      return {
+        ...item,
+        productName: item.product_name,
+        price: Number(item.price_at_purchase),
+        size,
+        color,
+        quantity: item.quantity,
+      };
+    })
+  };
+
+  const reference = orderData.payment_reference || "";
   const publicKey = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || "";
 
   return (

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { getAdminClient } from "@/lib/supabase";
 import { verifyTransaction } from "@/lib/paystack";
 
 export async function GET(req: Request) {
@@ -15,29 +15,24 @@ export async function GET(req: Request) {
   }
 
   try {
-    // 1. Find the pending payment records
-    const payment = await prisma.payment.findUnique({
-      where: { paystackReference: reference },
-      include: {
-        order: {
-          include: {
-            items: true,
-          },
-        },
-      },
-    });
+    const supabase = getAdminClient();
 
-    if (!payment) {
+    // 1. Find the order by payment reference
+    const { data: order } = await supabase
+      .from("orders")
+      .select("*, order_items(*)")
+      .eq("payment_reference", reference)
+      .single();
+
+    if (!order) {
       if (isJson) {
         return NextResponse.json({ success: false, error: "payment_not_found" }, { status: 404 });
       }
       return NextResponse.redirect(new URL("/cart?error=payment_not_found", req.url));
     }
 
-    const order = payment.order;
-
     // If order is already paid, just redirect to confirmation
-    if (order.paymentStatus === "PAID") {
+    if (order.payment_status === "paid") {
       if (isJson) {
         return NextResponse.json({ success: true, orderId: order.id });
       }
@@ -52,45 +47,18 @@ export async function GET(req: Request) {
     const isSuccess = verifyRes.status && verifyRes.data.status === "success" && !isMockFailure;
 
     if (isSuccess) {
-      // 3. Complete payment transactionally
-      await prisma.$transaction(async (tx) => {
-        // Update payment record
-        await tx.payment.update({
-          where: { id: payment.id },
-          data: {
-            status: "SUCCESSFUL",
-            method: verifyRes.data.channel || "card",
-          },
-        });
+      // 3. Complete payment
+      await supabase
+        .from("orders")
+        .update({
+          payment_status: "paid",
+          status: "paid",
+          payment_gateway: verifyRes.data.channel || "card",
+        })
+        .eq("id", order.id);
 
-        // Update order status
-        await tx.order.update({
-          where: { id: order.id },
-          data: {
-            paymentStatus: "PAID",
-            orderStatus: "PROCESSING",
-          },
-        });
-
-        // Reduce inventory
-        for (const item of order.items) {
-          const variant = await tx.productVariant.findFirst({
-            where: {
-              productId: item.productId,
-              size: item.size,
-              color: item.color,
-            },
-          });
-
-          if (variant) {
-            const newStock = Math.max(0, variant.stock - item.quantity);
-            await tx.productVariant.update({
-              where: { id: variant.id },
-              data: { stock: newStock },
-            });
-          }
-        }
-      });
+      // Reduce inventory via RPC
+      await supabase.rpc("decrement_order_inventory", { p_order_id: order.id });
 
       if (isJson) {
         return NextResponse.json({ success: true, orderId: order.id });
@@ -98,19 +66,13 @@ export async function GET(req: Request) {
       return NextResponse.redirect(new URL(`/checkout/confirmation?orderId=${order.id}`, req.url));
     } else {
       // Payment failed
-      await prisma.$transaction([
-        prisma.payment.update({
-          where: { id: payment.id },
-          data: { status: "FAILED" },
-        }),
-        prisma.order.update({
-          where: { id: order.id },
-          data: {
-            paymentStatus: "FAILED",
-            orderStatus: "PENDING_PAYMENT", // Allow retry
-          },
-        }),
-      ]);
+      await supabase
+        .from("orders")
+        .update({
+          payment_status: "failed",
+          status: "pending", // Allow retry
+        })
+        .eq("id", order.id);
 
       if (isJson) {
         return NextResponse.json({ success: false, error: "payment_failed" }, { status: 400 });

@@ -1,6 +1,6 @@
 import React from "react";
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+import { getAdminClient } from "@/lib/supabase";
 import ProductCard from "@/components/ProductCard";
 
 export const revalidate = 0;
@@ -17,20 +17,36 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
   let products: any[] = [];
 
   if (query.trim()) {
-    products = await prisma.product.findMany({
-      where: {
-        status: "PUBLISHED",
-        OR: [
-          { name: { contains: query } },
-          { description: { contains: query } },
-          { category: { contains: query } },
-          { material: { contains: query } },
-        ],
-      },
-      include: {
-        variants: true,
-      },
-    });
+    const supabase = getAdminClient();
+    const { data: rawProducts } = await supabase
+      .from("products")
+      .select("*, product_variants(*), product_images(*), product_categories(categories(name))")
+      .eq("status", "active")
+      .or(`name.ilike.%${query}%,description.ilike.%${query}%,material.ilike.%${query}%`);
+      
+    if (rawProducts) {
+      products = rawProducts.map((p: any) => {
+        const images = (p.product_images || [])
+          .sort((a: any, b: any) => a.position - b.position)
+          .map((img: any) => img.url)
+          .join(",") || "/logo-colors.jpg";
+        const category = p.product_categories?.[0]?.categories?.name || "Uncategorized";
+        return {
+          id: p.id,
+          name: p.name,
+          slug: p.slug,
+          price: Number(p.price),
+          images,
+          category,
+          variants: (p.product_variants || []).map((v: any) => ({
+            id: v.id,
+            size: v.size,
+            color: v.color,
+            stock: v.stock_quantity,
+          })),
+        };
+      });
+    }
   }
 
   return (

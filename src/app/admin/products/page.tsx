@@ -1,5 +1,5 @@
 import React from "react";
-import { prisma } from "@/lib/prisma";
+import { getAdminClient } from "@/lib/supabase";
 import { formatNaira } from "@/lib/utils";
 import Link from "next/link";
 import { Plus, Box } from "lucide-react";
@@ -16,18 +16,18 @@ interface AdminProductsPageProps {
 export default async function AdminProductsPage({ searchParams }: AdminProductsPageProps) {
   const currentTab = searchParams.tab === "drafts" ? "drafts" : "published";
 
-  // Fetch products
-  const products = await prisma.product.findMany({
-    include: {
-      variants: true,
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
+  const supabase = getAdminClient();
 
-  const publishedProducts = products.filter((p) => p.status === "PUBLISHED");
-  const draftProducts = products.filter((p) => p.status === "DRAFT");
+  // Fetch products
+  const { data } = await supabase
+    .from("products")
+    .select("*, product_variants(*), product_categories(categories(name))")
+    .order("created_at", { ascending: false });
+
+  const allProducts = (data || []) as any[];
+
+  const publishedProducts = allProducts.filter((p) => p.status === "active");
+  const draftProducts = allProducts.filter((p) => p.status === "draft");
 
   const displayProducts = currentTab === "drafts" ? draftProducts : publishedProducts;
 
@@ -92,7 +92,8 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
             </thead>
             <tbody className="divide-y divide-brand-burgundy/5">
               {displayProducts.map((product) => {
-                const totalStock = product.variants.reduce((sum, v) => sum + v.stock, 0);
+                const totalStock = (product.product_variants || []).reduce((sum: number, v: any) => sum + v.stock_quantity, 0);
+                const categoryName = product.product_categories?.[0]?.categories?.name || 'Uncategorized';
                 return (
                   <tr key={product.id} className="hover:bg-brand-burgundy/5 transition-colors">
                     <td className="py-4">
@@ -105,16 +106,16 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
                         </span>
                       </div>
                     </td>
-                    <td className="py-4 text-brand-charcoal/80 uppercase text-xs tracking-wider">{product.category}</td>
-                    <td className="py-4 font-sans font-medium">{formatNaira(product.price)}</td>
+                    <td className="py-4 text-brand-charcoal/80 uppercase text-xs tracking-wider">{categoryName}</td>
+                    <td className="py-4 font-sans font-medium">{formatNaira(Number(product.price))}</td>
                     <td className="py-4 font-sans">
                       <span className={totalStock === 0 ? "text-brand-burgundy font-semibold" : "text-brand-charcoal"}>
                         {totalStock} pcs
                       </span>
                     </td>
                     <td className="py-4">
-                      <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold ${product.status === "PUBLISHED" ? "bg-brand-olive/15 text-brand-olive" : "bg-brand-burgundy/10 text-brand-burgundy"}`}>
-                        {product.status}
+                      <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold ${product.status === "active" ? "bg-brand-olive/15 text-brand-olive" : "bg-brand-burgundy/10 text-brand-burgundy"}`}>
+                        {product.status === "active" ? "PUBLISHED" : "DRAFT"}
                       </span>
                     </td>
                     <td className="py-4 text-right">
@@ -122,7 +123,7 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
                         <ProductActionsDropdown
                           productId={product.id}
                           productName={product.name}
-                          status={product.status}
+                          status={product.status === "active" ? "PUBLISHED" : "DRAFT"}
                         />
                       </div>
                     </td>

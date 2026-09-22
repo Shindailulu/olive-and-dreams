@@ -1,6 +1,6 @@
 import React from "react";
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+import { getAdminClient } from "@/lib/supabase";
 import ProductCard from "@/components/ProductCard";
 import { formatNaira } from "@/lib/utils";
 
@@ -25,55 +25,72 @@ export default async function ShopPage({ searchParams }: ShopPageProps) {
   const minPrice = parseFloat(searchParams.minPrice || "0");
   const maxPrice = parseFloat(searchParams.maxPrice || "200000");
 
-  // Build Prisma Where Clause
-  const whereClause: any = {
-    status: "PUBLISHED",
-    price: {
-      gte: minPrice,
-      lte: maxPrice,
-    },
-  };
+  const supabase = getAdminClient();
+
+  let selectQuery = "*, product_images(*), product_categories!inner(categories!inner(name, slug))";
+  
+  if (size || color) {
+    selectQuery += ", product_variants!inner(*)";
+  } else {
+    selectQuery += ", product_variants(*)";
+  }
+
+  let query = supabase
+    .from("products")
+    .select(selectQuery)
+    .eq("status", "active")
+    .gte("price", minPrice)
+    .lte("price", maxPrice);
 
   if (category !== "all") {
-    whereClause.category = category;
+    query = query.eq("product_categories.categories.name", category);
   }
 
-  // Filter by size and/or color inside variants
-  if (size || color) {
-    const variantFilter: any = {};
-    if (size) variantFilter.size = size;
-    if (color) variantFilter.color = color;
-    
-    whereClause.variants = {
-      some: variantFilter,
-    };
+  if (size) {
+    query = query.eq("product_variants.size", size);
+  }
+  if (color) {
+    query = query.eq("product_variants.color", color);
   }
 
-  // Build Prisma Order By Clause
-  let orderByClause: any = { createdAt: "desc" }; // default newest
   if (sort === "price-asc") {
-    orderByClause = { price: "asc" };
+    query = query.order("price", { ascending: true });
   } else if (sort === "price-desc") {
-    orderByClause = { price: "desc" };
+    query = query.order("price", { ascending: false });
   } else if (sort === "featured") {
-    orderByClause = { id: "asc" };
+    query = query.order("created_at", { ascending: true });
+  } else {
+    query = query.order("created_at", { ascending: false });
   }
 
-  // Fetch products
-  const products = await prisma.product.findMany({
-    where: whereClause,
-    orderBy: orderByClause,
-    include: {
-      variants: true,
-    },
+  const { data: rawProducts } = await query;
+
+  const products = (rawProducts || []).map((p: any) => {
+    const images = (p.product_images || [])
+      .sort((a: any, b: any) => a.position - b.position)
+      .map((img: any) => img.url)
+      .join(",") || "/logo-colors.jpg";
+    const categoryName = p.product_categories?.[0]?.categories?.name || "Uncategorized";
+    return {
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      price: Number(p.price),
+      images,
+      category: categoryName,
+      variants: (p.product_variants || []).map((v: any) => ({
+        id: v.id,
+        size: v.size,
+        color: v.color,
+        stock: v.stock_quantity,
+      })),
+    };
   });
 
-  // Extract unique sizes and colors for filter sidebar
-  const allVariants = await prisma.productVariant.findMany({
-    select: { size: true, color: true },
-  });
-  const uniqueSizes = Array.from(new Set(allVariants.map((v) => v.size)));
-  const uniqueColors = Array.from(new Set(allVariants.map((v) => v.color)));
+  const { data: allVariantsData } = await supabase.from("product_variants").select("size, color");
+  const allVariants = allVariantsData || [];
+  const uniqueSizes = Array.from(new Set(allVariants.map((v: any) => v.size).filter(Boolean)));
+  const uniqueColors = Array.from(new Set(allVariants.map((v: any) => v.color).filter(Boolean)));
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">

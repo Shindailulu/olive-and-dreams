@@ -1,35 +1,60 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { hashPassword } from "@/lib/auth";
+import { getAdminClient } from "@/lib/supabase";
+import { z } from "zod";
+
+const resetPasswordSchema = z.object({
+  email: z.string().email("Invalid email address"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
+});
 
 export async function POST(req: Request) {
   try {
-    const { email, password } = await req.json();
+    const body = await req.json();
+    const parsed = resetPasswordSchema.safeParse(body);
 
-    if (!email || !password) {
-      return NextResponse.json({ error: "Email and password are required" }, { status: 400 });
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.errors[0].message }, { status: 400 });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { email },
-    });
+    const { email, password } = parsed.data;
 
-    if (!user || user.role !== "CUSTOMER") {
-      return NextResponse.json({ error: "No customer account found with this email" }, { status: 404 });
+    const supabase = getAdminClient();
+    
+    // Find the user by email first
+    const { data: customer, error: customerError } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("email", email)
+      .single();
+
+    if (customerError || !customer) {
+      return NextResponse.json(
+        { error: "User not found" },
+        { status: 404 }
+      );
     }
 
-    // Hash the new password
-    const hashedPassword = await hashPassword(password);
+    // Update password using admin API
+    const { error: updateError } = await supabase.auth.admin.updateUserById(
+      customer.id,
+      { password }
+    );
 
-    // Update user password
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { password: hashedPassword },
+    if (updateError) {
+      return NextResponse.json(
+        { error: updateError.message },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json({
+      message: "Password reset successfully",
     });
-
-    return NextResponse.json({ success: true, message: "Password updated successfully" });
-  } catch (error: any) {
-    console.error("Reset Password Error:", error);
-    return NextResponse.json({ error: "Failed to reset password. Please try again." }, { status: 500 });
+  } catch (error) {
+    console.error("Password reset error:", error);
+    return NextResponse.json(
+      { error: "An unexpected error occurred" },
+      { status: 500 }
+    );
   }
 }

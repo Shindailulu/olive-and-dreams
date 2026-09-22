@@ -1,18 +1,13 @@
 import React from "react";
 import Image from "next/image";
-import { prisma } from "@/lib/prisma";
 
 export const revalidate = 0; // Fetch fresh data on page load
 
 export default async function AboutPage() {
-  // Fetch settings from database
-  const aboutSetting = await prisma.aboutPageSetting.findFirst();
-
-  const title = aboutSetting?.title || "many good things";
-  const subtitle = aboutSetting?.subtitle || "Our Story";
-  const image = aboutSetting?.image || "/logo-colors.jpg";
-  const rawContent = aboutSetting?.content || 
-    `Olive & Dreams is a contemporary Nigerian lifestyle and ready-to-wear fashion house born out of a desire for sweet, soft, and confident expression.
+  const title = "many good things";
+  const subtitle = "Our Story";
+  const image = "/logo-colors.jpg";
+  const rawContent = `Olive & Dreams is a contemporary Nigerian lifestyle and ready-to-wear fashion house born out of a desire for sweet, soft, and confident expression.
 
 We believe that clothing is an intimate form of expression. Our debut collection, *Do me nice, do me jeje*, embodies a mood that is sweet and sultry, feminine and elegant. Every piece is handcrafted in Nigeria with careful attention to tailoring, draping, and finish.
 

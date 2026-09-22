@@ -1,6 +1,6 @@
 import React from "react";
 import { getSessionUser } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { getAdminClient } from "@/lib/supabase";
 import AuthTabs from "@/components/AuthTabs";
 import LogoutButton from "@/components/LogoutButton";
 import { formatNaira } from "@/lib/utils";
@@ -27,16 +27,37 @@ export default async function AccountPage() {
     );
   }
 
-  // Fetch customer orders
-  const orders = await prisma.order.findMany({
-    where: { userId: sessionUser.id },
-    include: {
-      items: true,
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
+  const supabase = getAdminClient();
+  const { data: dbOrders } = await supabase
+    .from("orders")
+    .select("*, order_items(*)")
+    .eq("customer_id", sessionUser.id)
+    .order("created_at", { ascending: false });
+
+  const orders = (dbOrders || []).map((order: any) => ({
+    ...order,
+    id: order.id,
+    orderNumber: order.order_number,
+    paymentStatus: order.payment_status === "paid" ? "PAID" : (order.payment_status?.toUpperCase() || "UNKNOWN"),
+    orderStatus: order.status,
+    deliveryMethod: order.delivery_method,
+    total: Number(order.total),
+    createdAt: order.created_at,
+    items: (order.order_items || []).map((item: any) => {
+      const parts = (item.variant_title || "").split(" / ");
+      const size = parts[0] || "";
+      const color = parts[1] || "";
+      return {
+        ...item,
+        id: item.id,
+        productName: item.product_name,
+        price: Number(item.price_at_purchase),
+        size,
+        color,
+        quantity: item.quantity,
+      };
+    }),
+  }));
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
@@ -99,7 +120,7 @@ export default async function AccountPage() {
 
                   {/* Order Items */}
                   <div className="space-y-3">
-                    {order.items.map((item) => (
+                    {order.items.map((item: any) => (
                       <div key={item.id} className="flex justify-between items-center text-sm font-light">
                         <div>
                           <p className="font-serif text-brand-burgundy">{item.productName}</p>

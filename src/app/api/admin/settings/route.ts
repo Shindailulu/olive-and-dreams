@@ -1,12 +1,20 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { getAdminClient } from "@/lib/supabase";
 import { getSessionUser } from "@/lib/auth";
 
 export async function GET() {
   try {
-    const settings = await prisma.deliverySetting.findMany();
-    const about = await prisma.aboutPageSetting.findFirst();
-    return NextResponse.json({ settings, about });
+    const supabase = getAdminClient();
+    const { data: settings } = await supabase.from("delivery_methods").select("*");
+
+    const mappedSettings = (settings || []).map((s: any) => ({
+      ...s,
+      method: s.code,
+      fee: Number(s.fee),
+      locationDetails: s.location_details,
+    }));
+
+    return NextResponse.json({ settings: mappedSettings, about: null });
   } catch (error: any) {
     return NextResponse.json({ error: "Failed to fetch settings" }, { status: 500 });
   }
@@ -32,52 +40,31 @@ export async function POST(req: Request) {
       aboutImage,
     } = await req.json();
 
-    await prisma.$transaction([
-      prisma.deliverySetting.upsert({
-        where: { method: "ABUJA_PICKUP" },
-        update: {
-          enabled: abujaEnabled,
-          fee: abujaFee,
-          instructions: abujaInstructions,
-        },
-        create: {
-          method: "ABUJA_PICKUP",
-          enabled: abujaEnabled,
-          fee: abujaFee,
-          instructions: abujaInstructions,
-        },
-      }),
-      prisma.deliverySetting.upsert({
-        where: { method: "NATIONWIDE" },
-        update: {
-          enabled: nationwideEnabled,
-          fee: nationwideFee,
-          instructions: nationwideInstructions,
-        },
-        create: {
-          method: "NATIONWIDE",
-          enabled: nationwideEnabled,
-          fee: nationwideFee,
-          instructions: nationwideInstructions,
-        },
-      }),
-      prisma.aboutPageSetting.upsert({
-        where: { id: 1 },
-        update: {
-          title: aboutTitle,
-          subtitle: aboutSubtitle,
-          content: aboutContent,
-          image: aboutImage,
-        },
-        create: {
-          id: 1,
-          title: aboutTitle,
-          subtitle: aboutSubtitle,
-          content: aboutContent,
-          image: aboutImage,
-        },
-      }),
-    ]);
+    const supabase = getAdminClient();
+
+    const abujaUpsert = supabase.from("delivery_methods").upsert(
+      {
+        code: "ABUJA_PICKUP",
+        name: "Abuja Showroom Pickup",
+        enabled: abujaEnabled,
+        fee: abujaFee,
+        instructions: abujaInstructions,
+      },
+      { onConflict: "code" }
+    );
+
+    const nationwideUpsert = supabase.from("delivery_methods").upsert(
+      {
+        code: "NATIONWIDE",
+        name: "Nationwide Delivery",
+        enabled: nationwideEnabled,
+        fee: nationwideFee,
+        instructions: nationwideInstructions,
+      },
+      { onConflict: "code" }
+    );
+
+    await Promise.all([abujaUpsert, nationwideUpsert]);
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

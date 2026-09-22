@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { getAdminClient } from "@/lib/supabase";
 import { getSessionUser } from "@/lib/auth";
 import { initializeTransaction } from "@/lib/paystack";
 import { generateOrderNumber } from "@/lib/utils";
@@ -26,12 +26,17 @@ export async function POST(req: Request) {
     // 1. Authenticate user if logged in
     const user = await getSessionUser();
     const userId = user ? user.id : null;
+    const supabase = getAdminClient();
 
     // 2. Fetch shipping rate from settings
-    const shippingSetting = await prisma.deliverySetting.findUnique({
-      where: { method: deliveryMethod },
-    });
-    if (!shippingSetting || !shippingSetting.enabled) {
+    const { data: shippingSetting } = await supabase
+      .from("delivery_methods")
+      .select("*")
+      .eq("code", deliveryMethod)
+      .eq("enabled", true)
+      .single();
+
+    if (!shippingSetting) {
       return NextResponse.json({ error: "Selected delivery method is currently unavailable" }, { status: 400 });
     }
     const deliveryFee = shippingSetting.fee;
@@ -41,45 +46,39 @@ export async function POST(req: Request) {
     const orderItemsData = [];
 
     for (const item of items) {
-      const dbProduct = await prisma.product.findUnique({
-        where: { id: item.productId },
-        include: {
-          variants: {
-            where: {
-              size: item.size,
-              color: item.color,
-            },
-          },
-        },
-      });
+      const { data: productInfo, error } = await supabase
+        .from("products")
+        .select("*, product_variants!inner(*)")
+        .eq("id", item.productId)
+        .eq("product_variants.size", item.size)
+        .eq("product_variants.color", item.color)
+        .single();
 
-      if (!dbProduct) {
-        return NextResponse.json({ error: `Product ID ${item.productId} not found` }, { status: 400 });
-      }
-
-      const variant = dbProduct.variants[0];
-      if (!variant) {
+      if (error || !productInfo) {
         return NextResponse.json(
-          { error: `Variant not found: ${dbProduct.name} (${item.size}/${item.color})` },
+          { error: `Variant not found: (${item.size}/${item.color}) for Product ID ${item.productId}` },
           { status: 400 }
         );
       }
 
-      if (variant.stock < item.quantity) {
+      const variant = productInfo.product_variants[0];
+
+      if (variant.stock_quantity < item.quantity) {
         return NextResponse.json(
           {
-            error: `Insufficient stock for ${dbProduct.name} (${item.size}/${item.color}). Only ${variant.stock} left.`,
+            error: `Insufficient stock for ${productInfo.name} (${item.size}/${item.color}). Only ${variant.stock_quantity} left.`,
           },
           { status: 400 }
         );
       }
 
-      const itemPrice = dbProduct.price;
+      const itemPrice = productInfo.price;
       subtotal += itemPrice * item.quantity;
 
       orderItemsData.push({
-        productId: dbProduct.id,
-        productName: dbProduct.name,
+        productId: productInfo.id,
+        variantId: variant.id,
+        productName: productInfo.name,
         size: item.size,
         color: item.color,
         price: itemPrice,
@@ -90,38 +89,51 @@ export async function POST(req: Request) {
     const total = subtotal + deliveryFee;
     const orderNumber = generateOrderNumber();
 
-    // 4. Create Order & items transactionally
-    const order = await prisma.order.create({
-      data: {
-        orderNumber,
-        userId,
-        customerName,
-        customerEmail,
-        customerPhone,
+    // 4. Create Order
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .insert({
+        order_number: orderNumber,
+        customer_id: userId,
+        guest_name: customerName,
+        guest_email: customerEmail,
+        guest_phone: customerPhone,
         subtotal,
-        deliveryFee,
+        shipping_fee: deliveryFee,
         total,
-        deliveryMethod,
-        address,
-        city,
-        state,
-        additionalInstructions,
-        paymentStatus: "PENDING",
-        orderStatus: "PENDING_PAYMENT",
-        items: {
-          create: orderItemsData.map((item) => ({
-            productId: item.productId,
-            productName: item.productName,
-            size: item.size,
-            color: item.color,
-            price: item.price,
-            quantity: item.quantity,
-          })),
-        },
-      },
-    });
+        delivery_method: deliveryMethod,
+        shipping_address: { address, city, state },
+        additional_instructions: additionalInstructions,
+        status: "pending",
+        payment_status: "pending",
+        payment_gateway: "paystack",
+      })
+      .select()
+      .single();
 
-    // 5. Initiate Paystack Transaction
+    if (orderError || !order) {
+      throw orderError || new Error("Failed to create order");
+    }
+
+    // 5. Insert order items
+    const { error: itemsError } = await supabase.from("order_items").insert(
+      orderItemsData.map((item) => ({
+        order_id: order.id,
+        product_id: item.productId,
+        variant_id: item.variantId,
+        product_name: item.productName,
+        variant_title: `${item.size} / ${item.color}`,
+        price_at_purchase: item.price,
+        quantity: item.quantity,
+        total: item.price * item.quantity,
+      }))
+    );
+
+    if (itemsError) {
+      throw itemsError;
+    }
+
+    // 6. Initiate Paystack Transaction
     const protocol = req.headers.get("x-forwarded-proto") || "http";
     const host = req.headers.get("host");
     const callbackUrl = `${protocol}://${host}/api/checkout/verify`;
@@ -131,25 +143,22 @@ export async function POST(req: Request) {
 
     if (!paystackRes.status) {
       // Clean up/cancel order if payment initiation failed completely
-      await prisma.order.update({
-        where: { id: order.id },
-        data: {
-          orderStatus: "CANCELLED",
-          paymentStatus: "FAILED",
-        },
-      });
+      await supabase
+        .from("orders")
+        .update({
+          status: "cancelled",
+          payment_status: "failed",
+        })
+        .eq("id", order.id);
+
       return NextResponse.json({ error: "Failed to initialize payment gateway: " + paystackRes.message }, { status: 522 });
     }
 
     // Save payment reference
-    await prisma.payment.create({
-      data: {
-        orderId: order.id,
-        paystackReference: reference,
-        amount: total,
-        status: "PENDING",
-      },
-    });
+    await supabase
+      .from("orders")
+      .update({ payment_reference: reference })
+      .eq("id", order.id);
 
     return NextResponse.json({
       success: true,

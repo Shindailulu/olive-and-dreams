@@ -1,5 +1,5 @@
 import React from "react";
-import { prisma } from "@/lib/prisma";
+import { getAdminClient } from "@/lib/supabase";
 import { formatNaira } from "@/lib/utils";
 import Link from "next/link";
 import { CreditCard, Box } from "lucide-react";
@@ -7,14 +7,26 @@ import { CreditCard, Box } from "lucide-react";
 export const revalidate = 0;
 
 export default async function AdminPaymentsPage() {
-  const payments = await prisma.payment.findMany({
-    include: {
-      order: true,
+  const supabase = getAdminClient();
+  const { data: orders } = await supabase
+    .from("orders")
+    .select("*")
+    .not("payment_reference", "is", null)
+    .order("created_at", { ascending: false });
+
+  const payments = (orders || []).map((order: any) => ({
+    id: order.id,
+    paystackReference: order.payment_reference,
+    amount: Number(order.total),
+    createdAt: order.created_at,
+    method: order.payment_gateway || "N/A",
+    status: order.payment_status === "paid" ? "SUCCESSFUL" : (order.payment_status?.toUpperCase() || "UNKNOWN"),
+    order: {
+      id: order.id,
+      orderNumber: order.order_number,
+      customerName: order.guest_name,
     },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
+  }));
 
   return (
     <div className="space-y-8">

@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation";
 
 interface ProductDetailClientProps {
   product: {
-    id: number;
+    id: string;
     name: string;
     slug: string;
     description: string;
@@ -23,7 +23,7 @@ interface ProductDetailClientProps {
     careInstructions: string | null;
     sizeGuide: string | null;
     variants: {
-      id: number;
+      id: string;
       size: string;
       color: string;
       stock: number;

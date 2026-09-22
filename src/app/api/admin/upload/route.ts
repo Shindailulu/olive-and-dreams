@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
-import fs from "fs";
-import path from "path";
+import { getAdminClient } from "@/lib/supabase";
 
 export async function POST(req: Request) {
   try {
@@ -19,28 +18,31 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
-    // Convert File to Buffer
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-
-    // 3. Setup upload directory
-    const uploadDir = path.join(process.cwd(), "public", "uploads");
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-
-    // 4. Generate unique, safe filename
+    // 3. Generate unique, safe filename
     const timestamp = Date.now();
     const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
     const filename = `${timestamp}_${safeName}`;
-    const filePath = path.join(uploadDir, filename);
 
-    // 5. Write file to public/uploads
-    fs.writeFileSync(filePath, buffer);
+    // 4. Upload to Supabase Storage
+    const supabase = getAdminClient();
+    const { data, error } = await supabase.storage
+      .from("product-images")
+      .upload(filename, file, {
+        contentType: file.type,
+        upsert: false,
+      });
 
-    // 6. Return relative public path
-    const url = `/uploads/${filename}`;
-    return NextResponse.json({ success: true, url });
+    if (error) {
+      console.error("Supabase Storage Upload Error:", error);
+      return NextResponse.json({ error: "Failed to upload file: " + error.message }, { status: 500 });
+    }
+
+    // 5. Get public URL
+    const { data: urlData } = supabase.storage
+      .from("product-images")
+      .getPublicUrl(data.path);
+
+    return NextResponse.json({ success: true, url: urlData.publicUrl });
   } catch (error: any) {
     console.error("Upload error:", error);
     return NextResponse.json({ error: "Failed to upload file" }, { status: 500 });

@@ -1,41 +1,37 @@
 "use server";
 
-import { prisma } from "@/lib/prisma";
+import { getAdminClient } from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
 
 export async function handleDeleteProduct(formData: FormData) {
-  const productIdStr = formData.get("productId") as string;
-  if (!productIdStr) return;
-  
-  const productId = parseInt(productIdStr);
+  const productId = formData.get("productId") as string;
+  if (!productId) return;
+  const supabase = getAdminClient();
   
   try {
-    // Deletes cascadingly due to Prisma schema setup
-    await prisma.product.delete({
-      where: { id: productId },
-    });
-    revalidatePath("/admin/products");
-    revalidatePath("/shop");
-    revalidatePath("/");
+    // Delete variants first (cascade), then product
+    await supabase.from('product_variants').delete().eq('product_id', productId);
+    await supabase.from('product_images').delete().eq('product_id', productId);
+    await supabase.from('product_categories').delete().eq('product_id', productId);
+    await supabase.from('products').delete().eq('id', productId);
+    revalidatePath('/admin/products');
+    revalidatePath('/shop');
+    revalidatePath('/');
   } catch (err) {
     console.error("Delete product error:", err);
   }
 }
 
 export async function handlePublishProduct(formData: FormData) {
-  const productIdStr = formData.get("productId") as string;
-  if (!productIdStr) return;
-  
-  const productId = parseInt(productIdStr);
+  const productId = formData.get("productId") as string;
+  if (!productId) return;
+  const supabase = getAdminClient();
   
   try {
-    await prisma.product.update({
-      where: { id: productId },
-      data: { status: "PUBLISHED" },
-    });
-    revalidatePath("/admin/products");
-    revalidatePath("/shop");
-    revalidatePath("/");
+    await supabase.from('products').update({ status: 'active' }).eq('id', productId);
+    revalidatePath('/admin/products');
+    revalidatePath('/shop');
+    revalidatePath('/');
   } catch (err) {
     console.error("Publish product error:", err);
   }

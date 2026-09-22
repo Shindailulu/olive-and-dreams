@@ -1,19 +1,22 @@
 import React from "react";
-import { prisma } from "@/lib/prisma";
+import { getAdminClient } from "@/lib/supabase";
 import CheckoutForm from "@/components/CheckoutForm";
 
 export const revalidate = 0; // Fetch fresh delivery configurations live
 
 export default async function CheckoutPage() {
-  const deliveryOptions = await prisma.deliverySetting.findMany({
-    where: { enabled: true },
-    select: {
-      method: true,
-      fee: true,
-      instructions: true,
-      locationDetails: true,
-    },
-  });
+  const supabase = getAdminClient();
+  const { data } = await supabase
+    .from('delivery_methods')
+    .select('code, name, fee, enabled, instructions, location_details')
+    .eq('enabled', true);
+
+  const deliveryOptions = (data || []).map((d: any) => ({
+    method: d.code,
+    fee: Number(d.fee),
+    instructions: d.instructions,
+    locationDetails: d.location_details,
+  }));
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
