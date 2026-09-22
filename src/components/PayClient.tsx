@@ -58,9 +58,15 @@ export default function PayClient({ order, checkoutUrl, reference, publicKey, in
       const script = document.createElement("script");
       script.src = "https://js.paystack.co/v1/inline.js";
       script.async = true;
+      script.crossOrigin = "anonymous";
+      script.onerror = () => {
+        console.warn("Paystack inline script failed to load (blocked by an extension/network?). Falling back to hosted checkout on payment click.");
+      };
       document.body.appendChild(script);
       return () => {
-        document.body.removeChild(script);
+        if (document.body.contains(script)) {
+          document.body.removeChild(script);
+        }
       };
     }
   }, [publicKey]);
