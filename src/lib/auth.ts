@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 const JWT_SECRET = process.env.JWT_SECRET || "olive_dreams_default_jwt_secret_key_nigeria_2026";
 
 export interface JWTPayload {
-  id: number;
+  id: string;
   email: string;
   name: string;
   role: string;
